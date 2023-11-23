@@ -1,36 +1,75 @@
 import { web3, utils, BorshCoder, Idl } from "@coral-xyz/anchor";
 import { decodeIdlAccount, idlAddress } from "@coral-xyz/anchor/dist/cjs/idl";
+import { BunFile } from "bun";
+import { Command, Option } from "commander";
 import { inflate } from "pako";
-import { Command } from "commander";
 import * as util from "util";
 
-const idlOption = {
-  flag: "--idl <file>",
-  description: "IDL file",
-};
+const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com/";
 
-const urlOption = {
-  flag: "--url <string>",
-  description: "URL for Solana's JSON RPC",
-  default: "https://api.mainnet-beta.solana.com/",
-};
+const idlOption = new Option("--idl <file>", "IDL file")
+  .argParser(toFile)
+  .conflicts("program");
+
+const programOption = new Option("--program <PUBKEY>", "progam ID")
+  .argParser(toPubkey)
+  .conflicts("idl");
+
+const urlOption = new Option("--url <URL>", "URL for Solana's JSON RPC")
+  .default(new web3.Connection(DEFAULT_RPC_URL), DEFAULT_RPC_URL)
+  .argParser(toConnection);
 
 const program = new Command();
 
 program
-  .command("events <strings...>")
-  .option(idlOption.flag, idlOption.description)
-  .option("--program <string>", "program IDL to fetch the idl from")
-  .option(urlOption.flag, urlOption.description, urlOption.default)
+  .command("events <b64strings...>")
+  .addOption(programOption)
+  .addOption(idlOption)
+  .addOption(urlOption)
   .action(decodeEvents);
 
 program
-  .command("accounts <strings...>")
-  .option(idlOption.flag, idlOption.description)
-  .option(urlOption.flag, urlOption.description, urlOption.default)
+  .command("accounts <pubkeys...>")
+  .addOption(idlOption)
+  .addOption(urlOption)
   .action(decodeAccounts);
 
 program.parse();
+
+function assertIsError(error: unknown): asserts error is Error {
+  if (!(error instanceof Error)) {
+    throw error;
+  }
+}
+
+function toFile(str: string): BunFile {
+  const file = Bun.file(str);
+  if (!file.exists()) {
+    console.log(`File "${str}" doesn't exist`);
+    process.exit(1);
+  }
+  return file;
+}
+
+function toPubkey(str: string): web3.PublicKey {
+  try {
+    return new web3.PublicKey(str);
+  } catch (err: unknown) {
+    assertIsError(err);
+    console.log(`Invalid pubkey "${str}": ${err.message}`);
+    process.exit(1);
+  }
+}
+
+function toConnection(str: string): web3.Connection {
+  try {
+    return new web3.Connection(str);
+  } catch (err: unknown) {
+    assertIsError(err);
+    console.log(`Invalid URL "${str}": ${err.message}`);
+    process.exit(1);
+  }
+}
 
 function valuesToString(obj: object) {
   for (const key of Object.keys(obj)) {
@@ -77,13 +116,19 @@ async function fetchIdls(
   return idls;
 }
 
-async function decodeEvents(events, options, _command) {
+interface EventsOpts {
+  idl?: BunFile;
+  program?: web3.PublicKey;
+  url: web3.Connection;
+}
+
+async function decodeEvents(events: string[], opts: EventsOpts) {
   let idl: Idl;
-  if (options.idl) {
-    idl = await Bun.file(options.idl).json();
-  } else if (options.program) {
-    const conn = new web3.Connection(options.url);
-    const programId = new web3.PublicKey(options.program);
+  if (opts.idl) {
+    idl = await opts.idl.json();
+  } else if (opts.program) {
+    const conn = opts.url;
+    const programId = opts.program;
     const idlMap = await fetchIdls(conn, [programId]);
     idl = idlMap.get(programId);
   } else {
@@ -101,15 +146,22 @@ async function decodeEvents(events, options, _command) {
   console.log(toString(results));
 }
 
-async function decodeAccounts(accounts, options, _command) {
-  const conn = new web3.Connection(options.url);
+interface AccountsOpts {
+  idl?: BunFile;
+  url: web3.Connection;
+}
+
+async function decodeAccounts(accounts: string[], opts: AccountsOpts) {
+  accounts.forEach((acc) => toPubkey(acc));
+
+  const conn = opts.url;
   const pubkeys = accounts.map((a) => new web3.PublicKey(a));
-  const infos = await conn.getMultipleAccountsInfo(pubkeys);
+  const infos = await opts.url.getMultipleAccountsInfo(pubkeys);
   const programIds = infos.map((x) => x.owner);
 
   let idls: Map<web3.PublicKey, Idl>;
-  if (options.idl) {
-    const idl = await Bun.file(options.idl).json();
+  if (opts.idl) {
+    const idl = await opts.idl.json();
     idls = new Map(programIds.map((x) => [x, idl]));
   } else {
     idls = await fetchIdls(conn, programIds);

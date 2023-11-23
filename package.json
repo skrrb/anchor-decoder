@@ -5,7 +5,6 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.29.0",
-    "cmd-ts": "^0.13.0",
     "commander": "^11.1.0",
     "pako": "^2.1.0"
   },
