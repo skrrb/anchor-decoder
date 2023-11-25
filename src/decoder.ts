@@ -1,5 +1,11 @@
 import { web3, utils, BorshCoder, Idl } from "@coral-xyz/anchor";
 import { decodeIdlAccount, idlAddress } from "@coral-xyz/anchor/dist/cjs/idl";
+import {
+  unpackAccount,
+  unpackMint,
+  unpackMultisig,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { BunFile } from "bun";
 import { Command, Option } from "commander";
 import { inflate } from "pako";
@@ -155,6 +161,20 @@ async function decodeEvents(events: string[], opts: EventsOpts) {
   console.log(toString(results));
 }
 
+function decodeSpl(pubkey: web3.PublicKey, info: web3.AccountInfo<Buffer>) {
+  const fns = [unpackAccount, unpackMint, unpackMultisig];
+
+  for (const fn of fns) {
+    try {
+      return valuesToString(fn(pubkey, info));
+    } catch {
+      // we dont care
+    }
+  }
+
+  return "error: cannot decode";
+}
+
 interface AccountsOpts {
   idl?: BunFile;
   url: web3.Connection;
@@ -183,6 +203,8 @@ async function decodeAccounts(accounts: string[], opts: AccountsOpts) {
       results[accounts[indx]] = decoded
         ? valuesToString(decoded)
         : "error: cannot decode";
+    } else if (info.owner.equals(TOKEN_PROGRAM_ID)) {
+      results[accounts[indx]] = decodeSpl(pubkeys[indx], info);
     } else {
       results[accounts[indx]] = "error: idl not found";
     }
