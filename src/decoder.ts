@@ -89,6 +89,7 @@ function valuesToString(obj: object) {
 
 function toString(obj: object): string {
   return util.inspect(obj, {
+    colors: process.stdout.isTTY,
     depth: null,
     maxArrayLength: null,
     maxStringLength: null,
@@ -131,6 +132,14 @@ async function decodeEvents(events: string[], opts: EventsOpts) {
     const programId = opts.program;
     const idlMap = await fetchIdls(conn, [programId]);
     idl = idlMap.get(programId);
+    if (!idl) {
+      console.log(
+        `error: cannot fetch idl for program ${programId.toString()} in ${
+          conn.rpcEndpoint
+        }`,
+      );
+      process.exit(1);
+    }
   } else {
     console.log("error: missing required argument --program or --idl");
     process.exit(1);
@@ -140,7 +149,7 @@ async function decodeEvents(events: string[], opts: EventsOpts) {
   const coder = new BorshCoder(idl);
   events.forEach((event) => {
     const decoded = coder.events.decode(event);
-    results[event] = decoded ? valuesToString(decoded) : null;
+    results[event] = decoded ? valuesToString(decoded) : "error: cannot decode";
   });
 
   console.log(toString(results));
@@ -152,10 +161,8 @@ interface AccountsOpts {
 }
 
 async function decodeAccounts(accounts: string[], opts: AccountsOpts) {
-  accounts.forEach((acc) => toPubkey(acc));
-
   const conn = opts.url;
-  const pubkeys = accounts.map((a) => new web3.PublicKey(a));
+  const pubkeys = accounts.map((a) => toPubkey(a));
   const infos = await opts.url.getMultipleAccountsInfo(pubkeys);
   const programIds = infos.map((x) => x.owner);
 
@@ -170,9 +177,15 @@ async function decodeAccounts(accounts: string[], opts: AccountsOpts) {
   const results = {};
   infos.forEach((info, indx) => {
     const idl = idls.get(programIds[indx]);
-    const coder = new BorshCoder(idl);
-    const decoded = coder.accounts.decodeAny(info.data);
-    results[accounts[indx]] = decoded ? valuesToString(decoded) : null;
+    if (idl) {
+      const coder = new BorshCoder(idl);
+      const decoded = coder.accounts.decodeAny(info.data);
+      results[accounts[indx]] = decoded
+        ? valuesToString(decoded)
+        : "error: cannot decode";
+    } else {
+      results[accounts[indx]] = "error: idl not found";
+    }
   });
 
   console.log(toString(results));
