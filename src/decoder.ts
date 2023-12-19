@@ -184,7 +184,7 @@ async function decodeAccounts(accounts: string[], opts: AccountsOpts) {
   const conn = opts.url;
   const pubkeys = accounts.map((a) => toPubkey(a));
   const infos = await opts.url.getMultipleAccountsInfo(pubkeys);
-  const programIds = infos.map((x) => x.owner);
+  const programIds = infos.filter((x) => x).map((x) => x.owner);
 
   let idls: Map<web3.PublicKey, Idl>;
   if (opts.idl) {
@@ -197,7 +197,9 @@ async function decodeAccounts(accounts: string[], opts: AccountsOpts) {
   const results = {};
   infos.forEach((info, indx) => {
     const idl = idls.get(programIds[indx]);
-    if (idl) {
+    if (!info) {
+      results[accounts[indx]] = "error: account not found";
+    } else if (idl) {
       const coder = new BorshCoder(idl);
       const decoded = coder.accounts.decodeAny(info.data);
       results[accounts[indx]] = decoded
